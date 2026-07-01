@@ -322,6 +322,36 @@
 
 <script>
 (function(){
+  // Real, persistent storage using the browser's localStorage — works on
+  // any hosted site or installed app, unlike Claude's in-chat storage API.
+  const LS_PREFIX = 'quietpages:';
+  const storage = {
+    async get(key){
+      const raw = localStorage.getItem(LS_PREFIX + key);
+      if(raw === null) return null;
+      return { key, value: raw };
+    },
+    async set(key, value){
+      localStorage.setItem(LS_PREFIX + key, value);
+      return { key, value };
+    },
+    async delete(key){
+      localStorage.removeItem(LS_PREFIX + key);
+      return { key, deleted: true };
+    },
+    async list(prefix){
+      const keys = [];
+      for(let i = 0; i < localStorage.length; i++){
+        const full = localStorage.key(i);
+        if(full && full.startsWith(LS_PREFIX)){
+          const short = full.slice(LS_PREFIX.length);
+          if(!prefix || short.startsWith(prefix)) keys.push(short);
+        }
+      }
+      return { keys };
+    }
+  };
+
   const MOODS = ["Heavy","Numb","Aching","Okay","Lighter","Grateful","Restless","Tired"];
   let unlockedHash = null;
   let currentDate = todayStr();
@@ -349,7 +379,7 @@
 
   async function init(){
     try{
-      const rec = await window.storage.get('journal:password-hash', false);
+      const rec = await storage.get('journal:password-hash');
       if(rec && rec.value){
         unlockedHash = null;
         show('unlock-gate');
@@ -371,7 +401,7 @@
     if(p1 !== p2){ err.textContent = "Passwords don't match."; return; }
     try{
       const hash = await sha256(p1);
-      await window.storage.set('journal:password-hash', hash, false);
+      await storage.set('journal:password-hash', hash);
       unlockedHash = hash;
       await enterApp();
     } catch(e){
@@ -388,7 +418,7 @@
     const err = document.getElementById('unlock-error');
     err.textContent = '';
     try{
-      const rec = await window.storage.get('journal:password-hash', false);
+      const rec = await storage.get('journal:password-hash');
       const hash = await sha256(p);
       if(rec && rec.value === hash){
         unlockedHash = hash;
@@ -406,11 +436,11 @@
   document.getElementById('reset-cancel').addEventListener('click', ()=> show('unlock-gate'));
   document.getElementById('reset-confirm').addEventListener('click', async ()=>{
     try{
-      const list = await window.storage.list('entries:', false);
+      const list = await storage.list('entries:');
       if(list && list.keys){
-        for(const k of list.keys){ await window.storage.delete(k, false); }
+        for(const k of list.keys){ await storage.delete(k); }
       }
-      await window.storage.delete('journal:password-hash', false);
+      await storage.delete('journal:password-hash');
     } catch(e){}
     show('setup-gate');
     document.getElementById('setup-pass').value = '';
@@ -454,7 +484,7 @@
     let existing = entriesCache[dateStr];
     if(existing === undefined){
       try{
-        const rec = await window.storage.get('entries:'+dateStr, false);
+        const rec = await storage.get('entries:'+dateStr);
         existing = rec && rec.value ? JSON.parse(rec.value) : null;
       } catch(e){ existing = null; }
       entriesCache[dateStr] = existing;
@@ -479,7 +509,7 @@
     }
     const entry = { date: currentDate, mood: selectedMood, text: text, savedAt: new Date().toISOString() };
     try{
-      const result = await window.storage.set('entries:'+currentDate, JSON.stringify(entry), false);
+      const result = await storage.set('entries:'+currentDate, JSON.stringify(entry));
       if(result){
         entriesCache[currentDate] = entry;
         status.textContent = 'Saved';
@@ -497,7 +527,7 @@
     const countEl = document.getElementById('entry-count');
     timeline.innerHTML = '<div class="empty">Loading entries…</div>';
     try{
-      const list = await window.storage.list('entries:', false);
+      const list = await storage.list('entries:');
       const keys = (list && list.keys) ? list.keys : [];
       if(keys.length === 0){
         timeline.innerHTML = '<div class="empty">No entries yet. Today is the first page.</div>';
@@ -507,7 +537,7 @@
       const entries = [];
       for(const k of keys){
         try{
-          const rec = await window.storage.get(k, false);
+          const rec = await storage.get(k);
           if(rec && rec.value) entries.push(JSON.parse(rec.value));
         } catch(e){}
       }
